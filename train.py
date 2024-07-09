@@ -238,7 +238,8 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
 
         env_res = render_env_map(scene.gaussians)
         for env_name in env_res.keys():
-            tb_writer.add_image("#envmap/{}".format(env_name), env_res[env_name], global_step=iteration)
+            if tb_writer:
+                tb_writer.add_image("#envmap/{}".format(env_name), env_res[env_name], global_step=iteration)
         
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:

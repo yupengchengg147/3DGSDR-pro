@@ -18,7 +18,8 @@ class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
-                 data_device = "cuda", HWK = None, gt_refl_mask = None
+                 data_device = "cuda", HWK = None, gt_refl_mask = None, 
+                 st_Delight = None, st_Normal = None
                  ):
         super(Camera, self).__init__()
 
@@ -49,8 +50,19 @@ class Camera(nn.Module):
 
             if gt_alpha_mask is not None:
                 self.original_image *= gt_alpha_mask.to(self.data_device)
+                self.mask = gt_alpha_mask.to(self.data_device) # 1, H, W
             else:
                 self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+                self.mask = None
+        
+        if st_Delight is not None:
+            self.st_Delight = torch.from_numpy(st_Delight).to(self.data_device).permute(2, 0, 1)
+        else:
+            self.st_Delight = None
+        if st_Normal is not None:
+            self.st_Normal = torch.from_numpy(st_Normal).to(self.data_device).permute(2, 0, 1) #range(0,1)
+        else:
+            self.st_Normal = None
 
         self.zfar = 100.0
         self.znear = 0.01

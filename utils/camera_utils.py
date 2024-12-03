@@ -51,6 +51,7 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
+        loaded_mask.requires_grad_(False)
 
     refl_path = os.path.join(
         os.path.dirname(os.path.dirname(cam_info.image_path)), 'image_msk')

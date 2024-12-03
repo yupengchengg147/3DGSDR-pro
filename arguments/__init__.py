@@ -97,6 +97,13 @@ class OptimizationParams(ParamGroup):
         self.use_env_scope = False
         self.env_scope_center = [0.,0.,0.]
         self.env_scope_radius = 0.0
+
+        self.lambda_mask_entropy = 0.1
+        self.lambda_nd = 0.01
+        self.lambda_stN = 0.1
+        self.lambda_stD = 0.1
+
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

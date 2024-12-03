@@ -17,6 +17,7 @@ import diff_gaussian_rasterization_c7
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.general_utils import sample_camera_rays, get_env_rayd1, get_env_rayd2
+from utils.loss_utils import depth_to_normal
 import numpy as np
 
 # rayd: x,3, from camera to world points
@@ -129,6 +130,28 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         cov3D_precomp = None,
         bg_map = bg_map)
     
+
+    p_hom = torch.cat([means3D, torch.ones_like(means3D[...,:1])], -1).unsqueeze(-1)
+    p_view = torch.matmul(viewpoint_camera.world_view_transform.transpose(0,1), p_hom)
+    depth = p_view[...,2:3,:].squeeze(-1)
+
+    input_do = torch.cat([torch.zeros_like(normals), torch.ones_like(normals), depth], dim=-1)
+    out_do, _ = rasterizer_c7(
+        means3D = means3D,
+        means2D = means2D,
+        shs = None,
+        colors_precomp = input_do,
+        opacities = opacities,
+        scales = scales,
+        rotations = rotations,
+        cov3D_precomp = None,
+        bg_map = bg_map_const)
+    
+    render_depth = out_do[6:7,...] # for depth normal consistency loss
+    n_from_d = depth_to_normal(viewpoint_camera, render_depth).permute(2,0,1) # 3,H,W, (-1, 1)
+
+    render_alpha = out_do[3:4,...] # for mask loss, and as mask to mask out the background
+    
     base_color = out_ts[:3,...] # 3,H,W
     refl_strength = out_ts[6:7,...] #
     normal_map = out_ts[3:6,...] 
@@ -142,9 +165,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     results = {
         "render": final_image,
         "refl_strength_map": refl_strength,
-        'normal_map': normal_map.permute(2,0,1),
+        'normal_map': normal_map.permute(2,0,1), # 3,H,W range(-1,1),
+        'normal_from_depth': n_from_d,
         "refl_color_map": refl_color,
         "base_color_map": base_color,
+        "render_depth": render_depth,
+        "render_alpha": render_alpha,
         "viewspace_points": screenspace_points,
         "visibility_filter" : _radii > 0,
         "radii": _radii

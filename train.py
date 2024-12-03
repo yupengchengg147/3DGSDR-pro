@@ -1,6 +1,7 @@
 
 import os
 import torch
+import torch.nn.functional as F
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, render_env_map
@@ -69,6 +70,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
+    ema_mask_entropy = 0.0
+    ema_dn_consist = 0.0
+
+
     progress_bar = tqdm(range(first_iter, TOT_ITER), desc="Training progress")
     first_iter += 1
     iteration = first_iter
@@ -119,7 +124,46 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Loss
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+        base_color = render_pkg["base_color_map"] # 3,H,W
+        rendered_opacity = render_pkg["render_alpha"] # 1,H,W
+        render_normal = render_pkg["normal_map"] # 3,H,W
+
+        loss_dict = {}
+
+        # mask entropy loss
+        if viewpoint_cam.mask is not None:
+            o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
+            image_mask = viewpoint_cam.mask.cuda()
+            loss_mask_entropy = -(image_mask * torch.log(o) + (1 - image_mask) * torch.log(1 - o)).mean()
+        else:
+            image_mask = torch.ones_like(rendered_opacity, requires_grad=False).cuda()
+            o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
+            loss_mask_entropy = torch.mean(torch.log(o) + torch.log(1 - o))
         
+        loss_dict['mask_entropy'] = loss_mask_entropy * opt.lambda_mask_entropy
+        
+        # Depth normal consistency loss
+        n_from_d = render_pkg["normal_from_depth"] # 3,H,W
+        loss_nd = 1 - (render_normal * n_from_d).sum(dim=0)[None]
+        loss_nd = (loss_nd*image_mask).mean()
+        loss_dict['depth_normal'] = loss_nd * opt.lambda_nd
+        
+        # normal prior
+        if args.stN:
+            render_normal_normalized = render_normal*0.5 + 0.5 # -1,1 -> 0,1
+            st_Normal = viewpoint_cam.st_Normal.permute(2,0,1) # 3,H,W, range(0,1)
+            loss_normal_prior = F.mse_loss(render_normal_normalized*image_mask, st_Normal*image_mask)
+            loss_dict['normal_prior'] = loss_normal_prior * opt.lambda_stN
+
+        # base_color prior
+        if args.stD:
+            st_Delight = viewpoint_cam.st_Delight.permute(2,0,1) # 3,H,W, range(0,1)
+            loss_base_color_prior = F.mse_loss(base_color*image_mask, st_Delight*image_mask)
+            loss_dict['base_color_prior'] = loss_base_color_prior * opt.lambda_stD
+
+        for _, v in loss_dict.items():
+            loss += v
 
         def get_outside_msk():
             return None if not USE_ENV_SCOPE else \
@@ -137,14 +181,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
+            ema_mask_entropy = 0.4 * loss_dict['mask_entropy'].item() + 0.6 * ema_mask_entropy
+            ema_dn_consist = 0.4 * loss_dict['depth_normal'].item() + 0.6 * ema_dn_consist
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                Loss_dict_record = {
+                    "loss": f"{ema_loss_for_log:.{5}f}",
+                    "mask_entropy": f"{ema_mask_entropy:.{5}f}",
+                    "depth_normal": f"{ema_dn_consist:.{5}f}"
+                }
+                progress_bar.set_postfix(Loss_dict_record)
                 progress_bar.update(10)
             if iteration == TOT_ITER:
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, loss_dict, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations or iteration == TOT_ITER-1):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -223,12 +274,14 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, loss_dict, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
         tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
+        for k, v in loss_dict.items():
+            tb_writer.add_scalar('train_loss_patches/' + k, v.item(), iteration)
 
     # Report test and samples of training set
     if iteration % 10_000 == 0:
@@ -286,6 +339,9 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--stD", action="store_true")
+    parser.add_argument("--stN", action="store_true")
+
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     

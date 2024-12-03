@@ -139,13 +139,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     out_do, _ = rasterizer_c7(
         means3D = means3D,
         means2D = means2D,
-        shs = None,
+        shs = shs,
         colors_precomp = input_do,
         opacities = opacities,
         scales = scales,
         rotations = rotations,
         cov3D_precomp = None,
-        bg_map = bg_map_const)
+        bg_map = bg_map)
     
     render_depth = out_do[6:7,...] # for depth normal consistency loss
     n_from_d = depth_to_normal(viewpoint_camera, render_depth).permute(2,0,1) # 3,H,W, (-1, 1)

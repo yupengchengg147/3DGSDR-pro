@@ -12,16 +12,19 @@
 from scene.cameras import Camera
 import numpy as np
 import os, cv2, torch
-from utils.general_utils import PILtoTorch
+from utils.general_utils import PILtoTorch, rescale_np_array
 from utils.graphics_utils import fov2focal
 
 WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale):
     orig_w, orig_h = cam_info.image.size
+    # print(f"Original resolution: {orig_w}x{orig_h}")
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
+        HWK = None
+        scale = resolution[0]/orig_w * (1./resolution_scale)
     else:  # should be a type that converts to float
         if args.resolution == -1:
             if False and orig_w > 1600: ###
@@ -39,19 +42,32 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
         HWK = None
-        if cam_info.K is not None:
-            K = cam_info.K.copy()
-            K[:2] = K[:2] * scale
-            HWK = (resolution[1], resolution[0], K)
+    
+    # print(f"Resolution: {resolution} Scale: {scale}")
+
+    if cam_info.K is not None:
+        K = cam_info.K.copy()
+        K[:2] = K[:2] * scale
+        HWK = (resolution[1], resolution[0], K)
 
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    resized_normal_map = rescale_np_array(cam_info.normal_map, resolution)
+    resized_base_color = rescale_np_array(cam_info.base_color, resolution)
+
+    # print(f"Resized image shape: {resized_image_rgb.shape}")
+    # print(f"Resized normal map shape: {resized_normal_map.shape}")
+    # print(f"Resized base color shape: {resized_base_color.shape}")
+    
 
     gt_image = resized_image_rgb[:3, ...]
-    loaded_mask = None
+    if cam_info.mask is not None:
+        loaded_mask = torch.from_numpy(cam_info.mask).float().permute(2,0,1)
+    else:
+        loaded_mask = None
 
-    if resized_image_rgb.shape[1] == 4:
-        loaded_mask = resized_image_rgb[3:4, ...]
-        loaded_mask.requires_grad_(False)
+    # if resized_image_rgb.shape[1] == 4:
+    #     loaded_mask = resized_image_rgb[3:4, ...]
+    #     loaded_mask.requires_grad_(False)
 
     refl_path = os.path.join(
         os.path.dirname(os.path.dirname(cam_info.image_path)), 'image_msk')
@@ -67,7 +83,8 @@ def loadCam(args, id, cam_info, resolution_scale):
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
                   image_name=cam_info.image_name, uid=id, 
-                  data_device=args.data_device, HWK=HWK, gt_refl_mask=refl_msk)
+                  data_device=args.data_device, HWK=HWK, gt_refl_mask=refl_msk, 
+                  st_Delight=resized_base_color, st_Normal=resized_normal_map)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

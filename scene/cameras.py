@@ -49,18 +49,18 @@ class Camera(nn.Module):
             self.image_height = self.original_image.shape[1]
 
             if gt_alpha_mask is not None:
-                self.original_image *= gt_alpha_mask.to(self.data_device)
+                # self.original_image *= gt_alpha_mask.to(self.data_device)
                 self.mask = gt_alpha_mask.to(self.data_device) # 1, H, W
             else:
-                self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+                # self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
                 self.mask = None
         
         if st_Delight is not None:
-            self.st_Delight = torch.from_numpy(st_Delight).to(self.data_device).permute(2, 0, 1)
+            self.st_Delight = torch.from_numpy(st_Delight).to(self.data_device, dtype=torch.float32).permute(2, 0, 1)
         else:
             self.st_Delight = None
         if st_Normal is not None:
-            self.st_Normal = torch.from_numpy(st_Normal).to(self.data_device).permute(2, 0, 1) #range(0,1)
+            self.st_Normal = torch.from_numpy(st_Normal).to(self.data_device, dtype=torch.float32).permute(2, 0, 1) #range(0,1)
         else:
             self.st_Normal = None
 

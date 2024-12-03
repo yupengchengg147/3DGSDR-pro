@@ -15,6 +15,7 @@ from datetime import datetime
 import numpy as np
 import random
 import open3d as o3d
+from PIL import Image
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -26,6 +27,16 @@ def PILtoTorch(pil_image, resolution):
         return resized_image.permute(2, 0, 1)
     else:
         return resized_image.unsqueeze(dim=-1).permute(2, 0, 1)
+
+def rescale_np_array(np_array, resolution):
+    # Convert numpy array to PIL image
+    pil_image = Image.fromarray((np_array * 255).astype(np.uint8))  # Convert to uint8
+    # Resize using bilinear interpolation
+    resized_image = pil_image.resize(resolution, Image.BILINEAR)
+    # Convert back to numpy array and normalize
+    resized_array = np.array(resized_image) / 255.0
+    return resized_array
+
 
 def get_expon_lr_func(
     lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000

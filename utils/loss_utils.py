@@ -111,11 +111,6 @@ def depth_to_normal(view, depth):
         view: view camera
         depth: depthmap 
     """
-    det = torch.det(view.world_view_transform)
-    print(f"Determinant: {det}")
-    if det == 0:
-        raise ValueError("Matrix is singular and cannot be inverted.")
-
     points = depths_to_points(view, depth).reshape(*depth.shape[1:], 3)
     output = torch.zeros_like(points)
     dx = torch.cat([points[2:, 1:-1] - points[:-2, 1:-1]], dim=0)

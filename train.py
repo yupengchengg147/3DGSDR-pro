@@ -116,7 +116,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
+        
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, initial_stage=initial_stage)
+
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # GT
@@ -133,13 +135,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # mask entropy loss
             if viewpoint_cam.mask is not None:
+                # print("mask_entropy loss with gt obj mask")
                 o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
                 image_mask = viewpoint_cam.mask.cuda()
                 loss_mask_entropy = -(image_mask * torch.log(o) + (1 - image_mask) * torch.log(1 - o)).mean()
             else:
+                # print("alpha zero one loss without gt obj mask")
                 image_mask = torch.ones_like(rendered_opacity, requires_grad=False).cuda()
                 o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
-                loss_mask_entropy = torch.mean(torch.log(o) + torch.log(1 - o))
+                loss_mask_entropy = torch.mean(torch.log(o) + torch.log(1 - o)) #to check its value
             
             loss_dict['mask_entropy'] = loss_mask_entropy * opt.lambda_mask_entropy
             
@@ -149,20 +153,32 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             loss_nd = (loss_nd*image_mask).mean()
             loss_dict['depth_normal'] = loss_nd * opt.lambda_nd
             
+            # print(image_mask.shape)
             # normal prior
-            if args.stN:
+            if args.stN and viewpoint_cam.st_Normal is not None:
                 render_normal_normalized = render_normal*0.5 + 0.5 # -1,1 -> 0,1
-                st_Normal = viewpoint_cam.st_Normal.permute(2,0,1) # 3,H,W, range(0,1)
+                st_Normal = viewpoint_cam.st_Normal # 3,H,W, range(0,1)
+
+                # print(render_normal_normalized.shape, st_Normal.shape, image_mask.shape)
+                # print(render_normal_normalized.min(), render_normal_normalized.max())
+                # print(st_Normal.min(), st_Normal.max())
+                
                 loss_normal_prior = F.mse_loss(render_normal_normalized*image_mask, st_Normal*image_mask)
                 loss_dict['normal_prior'] = loss_normal_prior * opt.lambda_stN
 
             # base_color prior
-            if args.stD:
-                st_Delight = viewpoint_cam.st_Delight.permute(2,0,1) # 3,H,W, range(0,1)
+            if args.stD and viewpoint_cam.st_Delight is not None:
+                st_Delight = viewpoint_cam.st_Delight # 3,H,W, range(0,1)
+
+                # print(base_color.shape, st_Delight.shape)
+                # print(base_color.max(), base_color.min())
+                # print(st_Delight.max(), st_Delight.min())
+
                 loss_base_color_prior = F.mse_loss(base_color*image_mask, st_Delight*image_mask)
                 loss_dict['base_color_prior'] = loss_base_color_prior * opt.lambda_stD
 
             for _, v in loss_dict.items():
+                # print(v.dtype)
                 loss += v
 
         def get_outside_msk():
@@ -295,6 +311,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, loss_dict, elapsed
             if tb_writer:
                 tb_writer.add_image("#envmap/{}".format(env_name), env_res[env_name], global_step=iteration)
         
+        to_render = ['refl_strength_map', 'normal_map', 'normal_from_depth', 'refl_color_map', 'base_color_map', 'render_depth', 'render_alpha']
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
@@ -303,9 +320,11 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, loss_dict, elapsed
                     res = renderFunc(viewpoint, scene.gaussians, more_debug_infos = True, *renderArgs)
                     image = torch.clamp(res["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+
                     if tb_writer and (idx < 5):
                         for maps_name in res.keys():
-                            if 'map' in maps_name:
+                            # if 'map' in maps_name:
+                            if (maps_name in to_render): 
                                 if 'normal' in maps_name:
                                      res[maps_name] = res[maps_name]*0.5+0.5
                                 tb_writer.add_image(config['name'] + "_view_{}/{}".format(viewpoint.image_name, maps_name), res[maps_name], global_step=iteration)    

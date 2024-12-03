@@ -37,6 +37,7 @@ class CameraInfo(NamedTuple):
     height: int
     base_color: np.array = None
     normal_map: np.array = None
+    mask: np.array = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -133,13 +134,13 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
         base_color_data = np.array(Image.open(base_color_path).convert("RGB")) / 255.0
         normal_data = np.array(Image.open(normal_path).convert("RGB")) / 255.0
-        mask_data = np.ones_like(base_color_data[:,:,0:1])
-
         
+        
+        mask_data = None
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, K=K, FovY=FovY, FovX=FovX, image=image,
                               image_path=image_path, image_name=image_name, width=width, height=height, 
-                              base_color=base_color_data, normal_map=normal_data)
+                              base_color=base_color_data, normal_map=normal_data, mask=mask_data)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -262,8 +263,18 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             base_color_path = image_path.replace(folder_name, folder_name+'_delight')
             normal_path = image_path.replace(folder_name, folder_name+'_normal')
 
+            # print("reading st Delight data from", base_color_path)
+            # print("reading st Normal data from", normal_path)
+
             base_color_data = np.array(Image.open(base_color_path).convert("RGB")) / 255.0
             normal_data = np.array(Image.open(normal_path).convert("RGB")) / 255.0
+
+            # print("base_color_data", base_color_data.shape)
+            # print("normal_data", normal_data.shape)
+
+            mask_data = norm_data[:, :, 3:4]
+            # print("mask_data", mask_data.shape)
+            # print(mask_data.max(), mask_data.min())
 
 
             arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
@@ -284,7 +295,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             # For blender datasets, we consider its camera center offset is zero (ideal camera)
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, K=K, FovY=FovY, FovX=FovX, image=image,
                             image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], 
-                            base_color=base_color_data, normal_map=normal_data))
+                            base_color=base_color_data, normal_map=normal_data, mask=mask_data))
             
     return cam_infos
 

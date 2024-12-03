@@ -98,10 +98,10 @@ class OptimizationParams(ParamGroup):
         self.env_scope_center = [0.,0.,0.]
         self.env_scope_radius = 0.0
 
-        self.lambda_mask_entropy = 0.1
-        self.lambda_nd = 0.01
-        self.lambda_stN = 0.1
-        self.lambda_stD = 0.1
+        self.lambda_mask_entropy = 0.08 #3e-4
+        self.lambda_nd = 0.05 # 1e-3
+        self.lambda_stN = 0.05 # 2e-3
+        self.lambda_stD = 0.1 # 1e-3
 
 
         super().__init__(parser, "Optimization Parameters")

@@ -124,46 +124,46 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Loss
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-
-        base_color = render_pkg["base_color_map"] # 3,H,W
-        rendered_opacity = render_pkg["render_alpha"] # 1,H,W
-        render_normal = render_pkg["normal_map"] # 3,H,W
-
         loss_dict = {}
 
-        # mask entropy loss
-        if viewpoint_cam.mask is not None:
-            o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
-            image_mask = viewpoint_cam.mask.cuda()
-            loss_mask_entropy = -(image_mask * torch.log(o) + (1 - image_mask) * torch.log(1 - o)).mean()
-        else:
-            image_mask = torch.ones_like(rendered_opacity, requires_grad=False).cuda()
-            o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
-            loss_mask_entropy = torch.mean(torch.log(o) + torch.log(1 - o))
-        
-        loss_dict['mask_entropy'] = loss_mask_entropy * opt.lambda_mask_entropy
-        
-        # Depth normal consistency loss
-        n_from_d = render_pkg["normal_from_depth"] # 3,H,W
-        loss_nd = 1 - (render_normal * n_from_d).sum(dim=0)[None]
-        loss_nd = (loss_nd*image_mask).mean()
-        loss_dict['depth_normal'] = loss_nd * opt.lambda_nd
-        
-        # normal prior
-        if args.stN:
-            render_normal_normalized = render_normal*0.5 + 0.5 # -1,1 -> 0,1
-            st_Normal = viewpoint_cam.st_Normal.permute(2,0,1) # 3,H,W, range(0,1)
-            loss_normal_prior = F.mse_loss(render_normal_normalized*image_mask, st_Normal*image_mask)
-            loss_dict['normal_prior'] = loss_normal_prior * opt.lambda_stN
+        if not initial_stage:
+            base_color = render_pkg["base_color_map"] # 3,H,W
+            rendered_opacity = render_pkg["render_alpha"] # 1,H,W
+            render_normal = render_pkg["normal_map"] # 3,H,W
 
-        # base_color prior
-        if args.stD:
-            st_Delight = viewpoint_cam.st_Delight.permute(2,0,1) # 3,H,W, range(0,1)
-            loss_base_color_prior = F.mse_loss(base_color*image_mask, st_Delight*image_mask)
-            loss_dict['base_color_prior'] = loss_base_color_prior * opt.lambda_stD
+            # mask entropy loss
+            if viewpoint_cam.mask is not None:
+                o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
+                image_mask = viewpoint_cam.mask.cuda()
+                loss_mask_entropy = -(image_mask * torch.log(o) + (1 - image_mask) * torch.log(1 - o)).mean()
+            else:
+                image_mask = torch.ones_like(rendered_opacity, requires_grad=False).cuda()
+                o = rendered_opacity.clamp(1e-6, 1 - 1e-6)
+                loss_mask_entropy = torch.mean(torch.log(o) + torch.log(1 - o))
+            
+            loss_dict['mask_entropy'] = loss_mask_entropy * opt.lambda_mask_entropy
+            
+            # Depth normal consistency loss
+            n_from_d = render_pkg["normal_from_depth"] # 3,H,W
+            loss_nd = 1 - (render_normal * n_from_d).sum(dim=0)[None]
+            loss_nd = (loss_nd*image_mask).mean()
+            loss_dict['depth_normal'] = loss_nd * opt.lambda_nd
+            
+            # normal prior
+            if args.stN:
+                render_normal_normalized = render_normal*0.5 + 0.5 # -1,1 -> 0,1
+                st_Normal = viewpoint_cam.st_Normal.permute(2,0,1) # 3,H,W, range(0,1)
+                loss_normal_prior = F.mse_loss(render_normal_normalized*image_mask, st_Normal*image_mask)
+                loss_dict['normal_prior'] = loss_normal_prior * opt.lambda_stN
 
-        for _, v in loss_dict.items():
-            loss += v
+            # base_color prior
+            if args.stD:
+                st_Delight = viewpoint_cam.st_Delight.permute(2,0,1) # 3,H,W, range(0,1)
+                loss_base_color_prior = F.mse_loss(base_color*image_mask, st_Delight*image_mask)
+                loss_dict['base_color_prior'] = loss_base_color_prior * opt.lambda_stD
+
+            for _, v in loss_dict.items():
+                loss += v
 
         def get_outside_msk():
             return None if not USE_ENV_SCOPE else \
@@ -181,8 +181,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            ema_mask_entropy = 0.4 * loss_dict['mask_entropy'].item() + 0.6 * ema_mask_entropy
-            ema_dn_consist = 0.4 * loss_dict['depth_normal'].item() + 0.6 * ema_dn_consist
+            if not initial_stage:
+                ema_mask_entropy = 0.4 * loss_dict['mask_entropy'].item() + 0.6 * ema_mask_entropy
+                ema_dn_consist = 0.4 * loss_dict['depth_normal'].item() + 0.6 * ema_dn_consist
             if iteration % 10 == 0:
                 Loss_dict_record = {
                     "loss": f"{ema_loss_for_log:.{5}f}",
